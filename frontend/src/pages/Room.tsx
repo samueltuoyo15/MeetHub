@@ -22,7 +22,7 @@ const Room = () => {
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const peerConnection = useRef<RTCPeerConnection | null>(null);
-  const socket = useRef(io("http://localhost:10000"));
+  const socket = useRef(io(`${import.meta.env.VITE_BASE_URL}`));
 
   useEffect(() => {
     const initializeRoom = async () => {
@@ -153,7 +153,7 @@ const Room = () => {
           onClick={() => {
             const shareData = {
               title: "Your meeting code",
-              text: roomId,
+              text: roomId || "",
               url: "/",
             };
             navigator.share(shareData);

@@ -124,7 +124,7 @@ const CreateMeet = () => {
           onClick={() => {
             const shareData = {
             title: "Your meeting code",
-            text: roomId,
+            text: roomId || "",
             url: "/",
             };
           navigator.share(shareData);
