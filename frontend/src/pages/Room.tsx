@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { useParams, Link, useNavigate} from "react-router-dom";
-
+import { useParams } from "react-router-dom";
+import { io } from "socket.io-client";
 import {
   Video,
   VideoOff,
@@ -15,117 +15,133 @@ import {
 
 const Room = () => {
   const { roomId } = useParams();
-  const [isMicOn, setIsMicOn] = useState<boolean>(true);
-  const [isVideoOn, setIsVideoOn] = useState<boolean>(true);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null); 
-  
-  // grant access to push notifications 
-  const requestNotificationPermission = async () => {
-  if ('Notification' in window && Notification.permission === 'default') {
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      console.log('Notification permission granted.');
-    } else {
-      console.log('Notification permission denied.');
-    }
-  }
-};
+  const [isMicOn, setIsMicOn] = useState(true);
+  const [isVideoOn, setIsVideoOn] = useState(true);
 
-// function to send the push notifications 
-const sendPushNotification = () => {
-    if (Notification.permission === 'granted') {
-      navigator.serviceWorker.ready.then((registration) => {
-        registration.showNotification('Join the Call!', {
-          body: `Meeting Room: ${roomId}`,
-          icon: '/icon.png',
-          vibrate: [200, 100, 200],
-          tag: 'call-reminder',
-          actions: [
-            {
-              action: 'join',
-              title: 'Join Call',
-            },
-          ],
-        });
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const peerConnection = useRef<RTCPeerConnection | null>(null);
+  const socket = useRef(io("http://localhost:10000"));
+
+  useEffect(() => {
+    const initializeRoom = async () => {
+      await setupMediaDevices();
+      setupSocketListeners();
+      createPeerConnection();
+      socket.current.emit("join-room", roomId);
+    };
+
+    initializeRoom();
+
+    return () => {
+      cleanup();
+    };
+  }, [roomId]);
+
+  const setupMediaDevices = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
       });
+
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+    } catch (error) {
+      console.error("Error accessing media devices:", error);
     }
   };
 
-  useEffect(() => {
-    requestNotificationPermission();
-    sendPushNotification();
-  }, []);
-  
+  const setupSocketListeners = () => {
+    socket.current.on("user-joined", (userId) => {
+      console.log(`User ${userId} joined the room.`);
+    });
 
-  useEffect(() => {
-    const accessUserCamera = async () => {
-      try {
-        // Get user media devices
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: true,
+    socket.current.on("offer", async (offer) => {
+      if (!peerConnection.current) return;
+      await peerConnection.current.setRemoteDescription(offer);
+      const answer = await peerConnection.current.createAnswer();
+      await peerConnection.current.setLocalDescription(answer);
+      socket.current.emit("answer", { roomId, answer });
+    });
+
+    socket.current.on("answer", async (answer) => {
+      if (!peerConnection.current) return;
+      await peerConnection.current.setRemoteDescription(answer);
+    });
+
+    socket.current.on("ice-candidate", (candidate) => {
+      if (!peerConnection.current) return;
+      peerConnection.current.addIceCandidate(candidate);
+    });
+  };
+
+  const createPeerConnection = () => {
+    peerConnection.current = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+    });
+
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => {
+        peerConnection.current?.addTrack(track, streamRef.current!);
+      });
+    }
+
+    peerConnection.current.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.current.emit("ice-candidate", {
+          roomId,
+          candidate: event.candidate,
         });
-
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream; 
-        }
-      } catch (error) {
-        console.error("Error accessing User Media:", error);
       }
     };
 
-    accessUserCamera();
-
-    // Cleanup: Stop media tracks when the component unmounts
-    return () => {
-      stopMediaTracks();
+    peerConnection.current.ontrack = (event) => {
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = event.streams[0];
+      }
     };
-  }, []);
-
-  // Function to stop all media tracks
-  const stopMediaTracks = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null; 
-    }
   };
 
-  // Toggle mic functionality
+  const cleanup = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    peerConnection.current?.close();
+    socket.current.disconnect();
+  };
+
   const toggleMic = () => {
     if (streamRef.current) {
-      const audioTracks = streamRef.current.getAudioTracks();
-      audioTracks.forEach((track) => (track.enabled = !isMicOn));
+      streamRef.current.getAudioTracks().forEach((track) => {
+        track.enabled = !isMicOn;
+      });
     }
     setIsMicOn((prev) => !prev);
   };
 
-  // Toggle video functionality
   const toggleVideo = () => {
     if (streamRef.current) {
-      const videoTracks = streamRef.current.getVideoTracks();
-      videoTracks.forEach((track) => (track.enabled = !isVideoOn));
+      streamRef.current.getVideoTracks().forEach((track) => {
+        track.enabled = !isVideoOn;
+      });
     }
     setIsVideoOn((prev) => !prev);
   };
-  
-   // Handle leaving the meeting
-  const handleLeaveMeeting = () => {
-    stopMediaTracks();
 
-    // Delaying the navigation to ensure tracks are stopped
+  const handleLeaveMeeting = () => {
+    cleanup();
     setTimeout(() => {
       window.location.href = "/meet/new";
     }, 100);
   };
+
   return (
     <section className="p-2 bg-gray-800 text-white min-h-screen">
       <div className="mt-40">
         <h2 className="text-2xl font-bold">You are the only one here.</h2>
-        <p className="mb-6">
-          Share this meeting with others you want in this meeting.
-        </p>
+        <p className="mb-6">Share this meeting with others you want in this meeting.</p>
         <div className="mt-10 flex justify-between items-center p-3 bg-zinc-600 rounded-md">
           <span className="truncate">{roomId}</span>
           <Copy
@@ -155,10 +171,16 @@ const sendPushNotification = () => {
           muted
           className="float-right relative w-52 h-52 rounded"
         ></video>
+
+        <video
+          ref={remoteVideoRef}
+          autoPlay
+          playsInline
+          className="float-left relative w-52 h-52 rounded"
+        ></video>
       </div>
       <footer className="p-4 bg-gray-700 rounded-3xl fixed bottom-3 w-full">
         <div className="flex justify-between items-center">
-          {/* Video Toggle */}
           <button onClick={toggleVideo}>
             {isVideoOn ? (
               <Video className="h-14 w-14 bg-gray-600 p-2 rounded-full" />
@@ -166,8 +188,6 @@ const sendPushNotification = () => {
               <VideoOff className="h-14 w-14 bg-gray-600 p-2 rounded-full" />
             )}
           </button>
-
-          {/* Mic Toggle */}
           <button onClick={toggleMic}>
             {isMicOn ? (
               <Mic className="h-14 w-14 bg-gray-600 p-2 rounded-full" />
@@ -175,12 +195,9 @@ const sendPushNotification = () => {
               <MicOff className="h-14 w-14 bg-gray-600 p-2 rounded-full" />
             )}
           </button>
-
           <Hand className="h-14 w-14 bg-gray-600 p-2 rounded-full" />
           <EllipsisVertical className="h-14 w-14 bg-gray-600 p-2 rounded-full" />
-
-          {/* Leave Meeting */}
-          <button 
+          <button
             onClick={handleLeaveMeeting}
             className="h-14 w-14 bg-red-500 p-2 rounded-full flex items-center justify-center"
           >

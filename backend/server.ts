@@ -28,6 +28,17 @@ io.on("connection", (socket) => {
     console.log(`client ${socket.id} joined the room  ${roomId}`);
     socket.to(roomId).emit("User joined", socket.id);
   });
+  socket.on("offer", (data) => {
+    socket.to(data.roomId).emit("offer", data.offer);
+  });
+
+  socket.on("answer", (data) => {
+    socket.to(data.roomId).emit("answer", data.answer);
+  });
+
+  socket.on("ice-candidate", (data) => {
+    socket.to(data.roomId).emit("ice-candidate", data.candidate);
+  });
   
   socket.on("disconnected", () => console.log('Client Disconnected:', socket.id));
 });
