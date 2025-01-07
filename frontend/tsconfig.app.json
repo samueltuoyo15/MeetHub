@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM", "DOM.Iterable", "WebWorker"],
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "skipLibCheck": true,
+    "jsx": "react-jsx",
+    "noEmit": false,
+    "outDir": "./dist",
+    "allowSyntheticDefaultImports": true,
+    "strict": true
+  },
+  "include": ["src", "src/service-worker.ts",],
+  "exclude": ["node_modules"]
+}
