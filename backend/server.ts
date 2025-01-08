@@ -4,19 +4,20 @@ import { createServer } from "http";
 import dotenv from "dotenv";
 import cors from "cors";
 import helmet from "helmet";
+import { v4 as uuidv4 } from "uuid";
 
 dotenv.config();
 
 const app: Application = express();
 app.use(helmet());
-app.use(cors());
+app.use(cors({ origin: process.env.CLIENT_URL || "*" }));
 app.use(express.json());
 
 const server = createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: process.env.CLIENT_URL || "*",
     methods: ["GET", "POST"],
   },
 });
@@ -27,7 +28,7 @@ io.on("connection", (socket) => {
   console.log("New connection:", socket.id);
 
   socket.on("create-room", (_, callback) => {
-    const roomId = `meet-${Math.random().toString(36).substr(2, 9)}`;
+    const roomId = `meet-${uuidv4()}`;
     rooms[roomId] = [];
     callback(roomId);
   });
@@ -77,6 +78,7 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(process.env.PORT, () => {
-  console.log(`Server is running on http://localhost:${process.env.PORT}`);
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => {
+  console.log(`Server is running on http://localhost:${PORT}`);
 });
