@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
-import { io } from "socket.io-client";
+import socket from "../utils/socket-connection";
 import {
   Video,
   VideoOff,
@@ -23,7 +23,6 @@ const Room = () => {
   const remoteVideoRefs = useRef<{ [id: string]: HTMLVideoElement }>({});
   const streamRef = useRef<MediaStream | null>(null);
   const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
-  const socket = useRef(io(`${import.meta.env.VITE_BASE_URL}`));
 
   useEffect(() => {
     const initializeRoom = async () => {
@@ -113,7 +112,7 @@ const Room = () => {
       if (!remoteVideoRefs.current[targetId]) {
         const videoElement = document.createElement("video");
         videoElement.srcObject = event.streams[0];
-        videoElement.autoPlay = true;
+        videoElement.autoplay = true;
         videoElement.playsInline = true;
         remoteVideoRefs.current[targetId] = videoElement;
 

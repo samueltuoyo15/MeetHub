@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { Link as RouterLink } from "react-router-dom";
 import { Link as IconLink, Video, X, Copy, Share2 } from "lucide-react";
 import JoinMeet from "../Components/JoinMeet";
+import socket from "../utils/socket-connection";
 
 const CreateMeet = () => {
   const [isCreateNewMeeting, setIsCreateNewMeeting] = useState(false);
