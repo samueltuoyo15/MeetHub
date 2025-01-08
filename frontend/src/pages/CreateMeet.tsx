@@ -14,9 +14,11 @@ const CreateMeet = () => {
   const toggleCreateNewMeeting = () => setIsCreateNewMeeting((prev) => !prev);
 
   const generateUuid = () => {
-    const newRoomId = `meet-${uuidv4()}`;
-    setRoomId(newRoomId);
-  };
+  socket.emit("create-room", null, (roomId: string) => {
+    setRoomId(roomId);
+  });
+};
+
 
   const openCreateMeetingModal = () => {
     generateUuid();

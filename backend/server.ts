@@ -24,23 +24,24 @@ const io = new Server(server, {
 const rooms: { [roomId: string]: string[] } = {};
 
 io.on("connection", (socket) => {
+  console.log("New connection:", socket.id);
+
+  socket.on("create-room", (_, callback) => {
+    const roomId = `meet-${Math.random().toString(36).substr(2, 9)}`;
+    rooms[roomId] = [];
+    callback(roomId);
+  });
+
   socket.on("join-room", (roomId: string, callback) => {
     if (!rooms[roomId]) {
-      callback(false);
+      callback({ success: false, message: "Room does not exist." });
       return;
     }
     rooms[roomId].push(socket.id);
     socket.join(roomId);
     socket.to(roomId).emit("user-joined", socket.id);
     const clientsInRoom = rooms[roomId].filter((id) => id !== socket.id);
-    socket.emit("existing-participants", clientsInRoom);
-    callback(true);
-  });
-
-  socket.on("create-room", (_, callback) => {
-    const roomId = `meet-${Math.random().toString(36).substr(2, 9)}`;
-    rooms[roomId] = [];
-    callback(roomId);
+    callback({ success: true, participants: clientsInRoom });
   });
 
   socket.on("offer", (data) => {

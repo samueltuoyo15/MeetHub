@@ -42,8 +42,8 @@ const Room = () => {
   const setupSocketListeners = () => {
     socket.current.on("user-joined", (userId) => {
       console.log(`User ${userId} joined the room.`);
-      setParticipants((prev) => [...prev, userId]); // Add new participant to the list
-      createOffer(userId); // Create offer for the new user
+      setParticipants((prev) => [...prev, userId]);
+      createOffer(userId); 
     });
 
     socket.current.on("existing-participants", (existingParticipants) => {
