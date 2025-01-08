@@ -17,18 +17,18 @@ const Room = () => {
   const { roomId } = useParams();
   const [isMicOn, setIsMicOn] = useState(true);
   const [isVideoOn, setIsVideoOn] = useState(true);
+  const [participants, setParticipants] = useState<string[]>([]); // Store participants' socket ids
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteVideoRefs = useRef<HTMLVideoElement[]>([]); // To store references for remote video elements
   const streamRef = useRef<MediaStream | null>(null);
-  const peerConnection = useRef<RTCPeerConnection | null>(null);
+  const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map()); // Store peer connections for each participant
   const socket = useRef(io(`${import.meta.env.VITE_BASE_URL}`));
 
   useEffect(() => {
     const initializeRoom = async () => {
       await setupMediaDevices();
       setupSocketListeners();
-      createPeerConnection();
       socket.current.emit("join-room", roomId);
     };
 
@@ -38,6 +38,91 @@ const Room = () => {
       cleanup();
     };
   }, [roomId]);
+
+  const setupSocketListeners = () => {
+    socket.current.on("user-joined", (userId) => {
+      console.log(`User ${userId} joined the room.`);
+      setParticipants((prev) => [...prev, userId]); // Add new participant to the list
+      createOffer(userId); // Create offer for the new user
+    });
+
+    socket.current.on("existing-participants", (existingParticipants) => {
+      console.log("Existing participants:", existingParticipants);
+      setParticipants(existingParticipants); // Set the initial participants
+      existingParticipants.forEach((participantId) => {
+        createOffer(participantId); // Create offer for each existing participant
+      });
+    });
+
+    socket.current.on("offer", async (data) => {
+      if (!peerConnections.current.has(data.sender)) {
+        createPeerConnection(data.sender);
+      }
+      const peerConnection = peerConnections.current.get(data.sender)!;
+      await peerConnection.setRemoteDescription(data.offer);
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+      socket.current.emit("answer", { target: data.sender, answer });
+    });
+
+    socket.current.on("answer", async (data) => {
+      const peerConnection = peerConnections.current.get(data.sender);
+      if (peerConnection) {
+        await peerConnection.setRemoteDescription(data.answer);
+      }
+    });
+
+    socket.current.on("ice-candidate", (data) => {
+      const peerConnection = peerConnections.current.get(data.sender);
+      if (peerConnection) {
+        peerConnection.addIceCandidate(data.candidate);
+      }
+    });
+
+    socket.current.on("user-disconnected", (userId) => {
+      console.log(`User ${userId} disconnected.`);
+      setParticipants((prev) => prev.filter((id) => id !== userId)); // Remove disconnected user
+      // Close the peer connection for the disconnected user
+      if (peerConnections.current.has(userId)) {
+        peerConnections.current.get(userId)?.close();
+        peerConnections.current.delete(userId);
+      }
+    });
+  };
+
+  const createOffer = async (targetId: string) => {
+    if (!peerConnections.current.has(targetId)) {
+      createPeerConnection(targetId);
+    }
+    const peerConnection = peerConnections.current.get(targetId)!;
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    socket.current.emit("offer", { target: targetId, offer });
+  };
+
+  const createPeerConnection = (targetId: string) => {
+    const peerConnection = new RTCPeerConnection();
+    peerConnections.current.set(targetId, peerConnection);
+
+    // Add media stream tracks to peer connection
+    streamRef.current?.getTracks().forEach((track) => {
+      peerConnection.addTrack(track, streamRef.current!);
+    });
+
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.current.emit("ice-candidate", { target: targetId, candidate: event.candidate });
+      }
+    };
+
+    peerConnection.ontrack = (event) => {
+      // Find the remote video element to display the remote stream
+      const remoteVideo = remoteVideoRefs.current.find((video) => !video.srcObject);
+      if (remoteVideo) {
+        remoteVideo.srcObject = event.streams[0];
+      }
+    };
+  };
 
   const setupMediaDevices = async () => {
     try {
@@ -55,60 +140,9 @@ const Room = () => {
     }
   };
 
-  const setupSocketListeners = () => {
-    socket.current.on("user-joined", (userId) => {
-      console.log(`User ${userId} joined the room.`);
-    });
-
-    socket.current.on("offer", async (offer) => {
-      if (!peerConnection.current) return;
-      await peerConnection.current.setRemoteDescription(offer);
-      const answer = await peerConnection.current.createAnswer();
-      await peerConnection.current.setLocalDescription(answer);
-      socket.current.emit("answer", { roomId, answer });
-    });
-
-    socket.current.on("answer", async (answer) => {
-      if (!peerConnection.current) return;
-      await peerConnection.current.setRemoteDescription(answer);
-    });
-
-    socket.current.on("ice-candidate", (candidate) => {
-      if (!peerConnection.current) return;
-      peerConnection.current.addIceCandidate(candidate);
-    });
-  };
-
-  const createPeerConnection = () => {
-    peerConnection.current = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    });
-
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => {
-        peerConnection.current?.addTrack(track, streamRef.current!);
-      });
-    }
-
-    peerConnection.current.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.current.emit("ice-candidate", {
-          roomId,
-          candidate: event.candidate,
-        });
-      }
-    };
-
-    peerConnection.current.ontrack = (event) => {
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = event.streams[0];
-      }
-    };
-  };
-
   const cleanup = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
-    peerConnection.current?.close();
+    peerConnections.current.forEach((peerConnection) => peerConnection.close());
     socket.current.disconnect();
   };
 
@@ -140,7 +174,11 @@ const Room = () => {
   return (
     <section className="p-2 bg-gray-800 text-white min-h-screen">
       <div className="mt-40">
-        <h2 className="text-2xl font-bold">You are the only one here.</h2>
+        {participants.length > 1 ? (
+          <h2 className="text-2xl font-bold">People joined: {participants.length}</h2>
+        ) : (
+          <h2 className="text-2xl font-bold">You are the only one here.</h2>
+        )}
         <p className="mb-6">Share this meeting with others you want in this meeting.</p>
         <div className="mt-10 flex justify-between items-center p-3 bg-zinc-600 rounded-md">
           <span className="truncate">{roomId}</span>
@@ -164,6 +202,7 @@ const Room = () => {
           <span>Share Invite</span>
         </div>
 
+        {/* Local Video */}
         <video
           ref={videoRef}
           autoPlay
@@ -172,12 +211,22 @@ const Room = () => {
           className="float-right relative w-52 h-52 rounded"
         ></video>
 
-        <video
-          ref={remoteVideoRef}
-          autoPlay
-          playsInline
-          className="float-left relative w-52 h-52 rounded"
-        ></video>
+        {/* Remote Video(s) */}
+        {participants.length > 1 && (
+          <div className="mt-4">
+            {participants.map((participantId, index) => (
+              <video
+                key={participantId}
+                ref={(el) => {
+                  remoteVideoRefs.current[index] = el!;
+                }}
+                autoPlay
+                playsInline
+                className="float-left relative w-52 h-52 rounded"
+              ></video>
+            ))}
+          </div>
+        )}
       </div>
       <footer className="p-4 bg-gray-700 rounded-3xl fixed bottom-3 w-full">
         <div className="flex justify-between items-center">
