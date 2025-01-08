@@ -28,7 +28,7 @@ const Room = () => {
     const initializeRoom = async () => {
       await setupMediaDevices();
       setupSocketListeners();
-      socket.current.emit("join-room", roomId, (response: any) => {
+      socket.emit("join-room", roomId, (response: any) => {
         if (response.success) {
           setParticipants(response.participants);
         } else {
@@ -45,12 +45,12 @@ const Room = () => {
   }, [roomId]);
 
   const setupSocketListeners = () => {
-    socket.current.on("user-joined", (userId) => {
+    socket.on("user-joined", (userId) => {
       setParticipants((prev) => [...prev, userId]);
       createOffer(userId);
     });
 
-    socket.current.on("offer", async (data) => {
+    socket.on("offer", async (data) => {
       if (!peerConnections.current.has(data.sender)) {
         createPeerConnection(data.sender);
       }
@@ -58,24 +58,24 @@ const Room = () => {
       await peerConnection.setRemoteDescription(data.offer);
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
-      socket.current.emit("answer", { target: data.sender, answer });
+      socket.emit("answer", { target: data.sender, answer });
     });
 
-    socket.current.on("answer", async (data) => {
+    socket.on("answer", async (data) => {
       const peerConnection = peerConnections.current.get(data.sender);
       if (peerConnection) {
         await peerConnection.setRemoteDescription(data.answer);
       }
     });
 
-    socket.current.on("ice-candidate", (data) => {
+    socket.on("ice-candidate", (data) => {
       const peerConnection = peerConnections.current.get(data.sender);
       if (peerConnection) {
         peerConnection.addIceCandidate(data.candidate);
       }
     });
 
-    socket.current.on("user-disconnected", (userId) => {
+    socket.on("user-disconnected", (userId) => {
       setParticipants((prev) => prev.filter((id) => id !== userId));
       if (peerConnections.current.has(userId)) {
         peerConnections.current.get(userId)?.close();
@@ -91,7 +91,7 @@ const Room = () => {
     const peerConnection = peerConnections.current.get(targetId)!;
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
-    socket.current.emit("offer", { target: targetId, offer });
+    socket.emit("offer", { target: targetId, offer });
   };
 
   const createPeerConnection = (targetId: string) => {
@@ -104,7 +104,7 @@ const Room = () => {
 
     peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
-        socket.current.emit("ice-candidate", { target: targetId, candidate: event.candidate });
+        socket.emit("ice-candidate", { target: targetId, candidate: event.candidate });
       }
     };
 
@@ -142,7 +142,7 @@ const Room = () => {
   const cleanup = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     peerConnections.current.forEach((peerConnection) => peerConnection.close());
-    socket.current.disconnect();
+    socket.disconnect();
   };
 
   const toggleMic = () => {
