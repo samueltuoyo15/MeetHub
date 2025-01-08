@@ -17,19 +17,25 @@ const Room = () => {
   const { roomId } = useParams();
   const [isMicOn, setIsMicOn] = useState(true);
   const [isVideoOn, setIsVideoOn] = useState(true);
-  const [participants, setParticipants] = useState<string[]>([]); // Store participants' socket ids
+  const [participants, setParticipants] = useState<string[]>([]);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const remoteVideoRefs = useRef<HTMLVideoElement[]>([]); // To store references for remote video elements
+  const remoteVideoRefs = useRef<{ [id: string]: HTMLVideoElement }>({});
   const streamRef = useRef<MediaStream | null>(null);
-  const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map()); // Store peer connections for each participant
+  const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map());
   const socket = useRef(io(`${import.meta.env.VITE_BASE_URL}`));
 
   useEffect(() => {
     const initializeRoom = async () => {
       await setupMediaDevices();
       setupSocketListeners();
-      socket.current.emit("join-room", roomId);
+      socket.current.emit("join-room", roomId, (response: any) => {
+        if (response.success) {
+          setParticipants(response.participants);
+        } else {
+          alert(response.message);
+        }
+      });
     };
 
     initializeRoom();
@@ -41,17 +47,8 @@ const Room = () => {
 
   const setupSocketListeners = () => {
     socket.current.on("user-joined", (userId) => {
-      console.log(`User ${userId} joined the room.`);
       setParticipants((prev) => [...prev, userId]);
-      createOffer(userId); 
-    });
-
-    socket.current.on("existing-participants", (existingParticipants) => {
-      console.log("Existing participants:", existingParticipants);
-      setParticipants(existingParticipants); // Set the initial participants
-      existingParticipants.forEach((participantId) => {
-        createOffer(participantId); // Create offer for each existing participant
-      });
+      createOffer(userId);
     });
 
     socket.current.on("offer", async (data) => {
@@ -80,9 +77,7 @@ const Room = () => {
     });
 
     socket.current.on("user-disconnected", (userId) => {
-      console.log(`User ${userId} disconnected.`);
-      setParticipants((prev) => prev.filter((id) => id !== userId)); // Remove disconnected user
-      // Close the peer connection for the disconnected user
+      setParticipants((prev) => prev.filter((id) => id !== userId));
       if (peerConnections.current.has(userId)) {
         peerConnections.current.get(userId)?.close();
         peerConnections.current.delete(userId);
@@ -104,7 +99,6 @@ const Room = () => {
     const peerConnection = new RTCPeerConnection();
     peerConnections.current.set(targetId, peerConnection);
 
-    // Add media stream tracks to peer connection
     streamRef.current?.getTracks().forEach((track) => {
       peerConnection.addTrack(track, streamRef.current!);
     });
@@ -116,10 +110,11 @@ const Room = () => {
     };
 
     peerConnection.ontrack = (event) => {
-      // Find the remote video element to display the remote stream
-      const remoteVideo = remoteVideoRefs.current.find((video) => !video.srcObject);
-      if (remoteVideo) {
-        remoteVideo.srcObject = event.streams[0];
+      if (!remoteVideoRefs.current[targetId]) {
+        remoteVideoRefs.current[targetId] = document.createElement("video");
+        remoteVideoRefs.current[targetId].srcObject = event.streams[0];
+        remoteVideoRefs.current[targetId].autoPlay = true;
+        remoteVideoRefs.current[targetId].playsInline = true;
       }
     };
   };
@@ -130,13 +125,12 @@ const Room = () => {
         video: true,
         audio: true,
       });
-
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
     } catch (error) {
-      console.error("Error accessing media devices:", error);
+      alert("Please allow access to your camera and microphone.");
     }
   };
 
@@ -166,9 +160,7 @@ const Room = () => {
 
   const handleLeaveMeeting = () => {
     cleanup();
-    setTimeout(() => {
-      window.location.href = "/meet/new";
-    }, 100);
+    window.location.href = "/meet/new";
   };
 
   return (
