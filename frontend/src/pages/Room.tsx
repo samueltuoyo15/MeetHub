@@ -111,10 +111,16 @@ const Room = () => {
 
     peerConnection.ontrack = (event) => {
       if (!remoteVideoRefs.current[targetId]) {
-        remoteVideoRefs.current[targetId] = document.createElement("video");
-        remoteVideoRefs.current[targetId].srcObject = event.streams[0];
-        remoteVideoRefs.current[targetId].autoPlay = true;
-        remoteVideoRefs.current[targetId].playsInline = true;
+        const videoElement = document.createElement("video");
+        videoElement.srcObject = event.streams[0];
+        videoElement.autoPlay = true;
+        videoElement.playsInline = true;
+        remoteVideoRefs.current[targetId] = videoElement;
+
+        const videoContainer = document.getElementById("remote-videos");
+        if (videoContainer) {
+          videoContainer.appendChild(videoElement);
+        }
       }
     };
   };
@@ -204,21 +210,21 @@ const Room = () => {
         ></video>
 
         {/* Remote Video(s) */}
-        {participants.length > 1 && (
-          <div className="mt-4">
-            {participants.map((participantId, index) => (
-              <video
-                key={participantId}
-                ref={(el) => {
-                  remoteVideoRefs.current[index] = el!;
-                }}
-                autoPlay
-                playsInline
-                className="float-left relative w-52 h-52 rounded"
-              ></video>
-            ))}
-          </div>
-        )}
+        <div id="remote-videos" className="mt-4 flex flex-wrap gap-4">
+          {participants.map((participantId) => (
+            <video
+              key={participantId}
+              ref={(el) => {
+                if (el && !remoteVideoRefs.current[participantId]) {
+                  remoteVideoRefs.current[participantId] = el;
+                }
+              }}
+              autoPlay
+              playsInline
+              className="float-left relative w-52 h-52 rounded"
+            ></video>
+          ))}
+        </div>
       </div>
       <footer className="p-4 bg-gray-700 rounded-3xl fixed bottom-3 w-full">
         <div className="flex justify-between items-center">
